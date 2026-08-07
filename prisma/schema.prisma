@@ -1,0 +1,235 @@
+// Founders Mentality Portal — data model
+// Dev: SQLite (zero-config). Prod: swap provider to "postgresql" + DATABASE_URL. Nothing else changes.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------- Auth ----------------
+
+model User {
+  id           String   @id @default(cuid())
+  email        String?  @unique // nullable: Excel-imported trainees start with no email
+  name         String
+  passwordHash String? // trainees only — bcrypt hash. Admins never store a local password (see auth.ts).
+  role         String   @default("trainee") // trainee | admin
+  department   String?
+  active       Boolean  @default(true)
+  batchId      String?
+  batch        Batch?   @relation(fields: [batchId], references: [id])
+  oneOnOneNote String? // freeform note, maps Excel "1:1" column
+  createdAt    DateTime @default(now())
+
+  // Admins only. Regular admins can only export their own facilitator report; a super
+  // admin (e.g. the primary account) can export everyone's. Never affects trainee login
+  // or the mailbox-password auth flow — purely an export-scope permission.
+  isSuperAdmin Boolean @default(false)
+
+  sessions       Session[]
+  sessionRecords TraineeSessionRecord[]
+  submissions    WorksheetSubmission[]
+  events         Event[]
+  emailLogs      EmailLog[]
+
+  facilitatingBatches Batch[]            @relation("BatchFacilitator")
+  facilitatedSlots    BatchSessionSlot[] @relation("SlotFacilitator")
+
+  @@index([batchId])
+  @@index([role])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  // Admin-only: AES-256-GCM encrypted mailbox password, set at login, used to send
+  // mail as this admin for the life of the session. Never set for trainee sessions.
+  mailPasswordEnc String?
+}
+
+// One row per meaningful action — audit log.
+model Event {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  // login | logout | batch_create | batch_update | trainee_create | trainee_update |
+  // session_schedule | session_reschedule | session_complete | observation_save |
+  // worksheet_create | worksheet_assign | worksheet_submit | import_run | custom_email_send
+  detail    String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId])
+  @@index([type])
+}
+
+// ---------------- Batches & sessions ----------------
+
+model Batch {
+  id           String   @id @default(cuid())
+  name         String // "BATCH A", "BATCH 1", etc.
+  program      String   @default("founders-mentality") // founders-mentality | facilitator-workshop
+  sessionCount Int // variable per program — not hardcoded to 8
+  createdAt    DateTime @default(now())
+
+  // Current facilitator for this batch — changeable only from the batch detail page.
+  // Not a record of who taught which past session (see BatchSessionSlot.facilitatorId
+  // for that); this is "who's teaching it now/next", shown in the batches list.
+  facilitatorId String?
+  facilitator   User?   @relation("BatchFacilitator", fields: [facilitatorId], references: [id])
+
+  trainees    User[]
+  slots       BatchSessionSlot[]
+  assignments WorksheetAssignment[]
+
+  @@unique([program, name])
+}
+
+model BatchSessionSlot {
+  id              String    @id @default(cuid())
+  batchId         String
+  batch           Batch     @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  index           Int // 1..sessionCount
+  scheduledDate   DateTime?
+  status          String    @default("unscheduled") // unscheduled | scheduled | rescheduled | completed
+  rescheduledFrom DateTime? // previous date, kept for history when rescheduled
+  notifiedAt      DateTime? // when the batch was last emailed about this slot
+  notifiedForDate DateTime? // which scheduledDate value that email was for (dup-send guard)
+  summary         String? // admin-written recap emailed to trainees after the session runs
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Snapshotted from Batch.facilitatorId the moment this session is marked completed
+  // (see sendSlotSummary in scheduling.ts) — preserves who actually conducted THIS
+  // session even if the batch's facilitator changes later. Null for sessions that
+  // predate this feature or haven't been completed yet.
+  facilitatorId String?
+  facilitator   User?   @relation("SlotFacilitator", fields: [facilitatorId], references: [id])
+
+  records   TraineeSessionRecord[]
+  emailLogs EmailLog[]
+
+  @@unique([batchId, index])
+}
+
+model TraineeSessionRecord {
+  id          String           @id @default(cuid())
+  userId      String
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  slotId      String
+  slot        BatchSessionSlot @relation(fields: [slotId], references: [id], onDelete: Cascade)
+  completed   Boolean          @default(false)
+  completedAt DateTime?
+  observation String? // freeform per-session text (Excel S1..S8 columns)
+  updatedAt   DateTime         @updatedAt
+
+  @@unique([userId, slotId])
+}
+
+// ---------------- Generic worksheet engine ----------------
+
+model Worksheet {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  createdAt   DateTime @default(now())
+
+  items       WorksheetItem[]
+  assignments WorksheetAssignment[]
+}
+
+model WorksheetItem {
+  id          String    @id @default(cuid())
+  worksheetId String
+  worksheet   Worksheet @relation(fields: [worksheetId], references: [id], onDelete: Cascade)
+  order       Int
+  prompt      String
+  type        String    @default("likert5") // likert5 | text | mcq
+  minLabel    String? // e.g. "Strongly Disagree"
+  maxLabel    String? // e.g. "Strongly Agree"
+  optionsJson String? // JSON string[] — only used when type = "mcq"
+  required    Boolean   @default(true)
+
+  answers WorksheetAnswer[]
+
+  @@unique([worksheetId, order])
+}
+
+model WorksheetAssignment {
+  id                   String    @id @default(cuid())
+  worksheetId          String
+  worksheet            Worksheet @relation(fields: [worksheetId], references: [id], onDelete: Cascade)
+  batchId              String
+  batch                Batch     @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  timing               String    @default("standalone") // pre | post | standalone
+  relativeSessionIndex Int?
+  dueDate              DateTime?
+  assignedAt           DateTime  @default(now())
+
+  submissions WorksheetSubmission[]
+
+  @@index([batchId])
+  @@index([worksheetId])
+}
+
+model WorksheetSubmission {
+  id           String              @id @default(cuid())
+  assignmentId String
+  assignment   WorksheetAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  submittedAt  DateTime            @default(now())
+
+  answers WorksheetAnswer[]
+
+  @@unique([assignmentId, userId]) // enforces submit-once
+}
+
+model WorksheetAnswer {
+  id           String              @id @default(cuid())
+  submissionId String
+  submission   WorksheetSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  itemId       String
+  item         WorksheetItem       @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  valueInt     Int? // likert5 answer (1-5)
+  valueText    String? // text / mcq answer
+
+  @@unique([submissionId, itemId])
+}
+
+// ---------------- Email log ----------------
+
+model EmailLog {
+  id       String  @id @default(cuid())
+  toUserId String
+  toUser   User    @relation(fields: [toUserId], references: [id], onDelete: Cascade)
+  toEmail  String // snapshot even if user's email later changes
+
+  sentByUserId String? // which admin's mailbox actually sent it (null for simulated/dev sends with no admin context)
+
+  kind    String // session_scheduled | session_rescheduled | session_summary | custom_ai
+  batchId String?
+  slotId  String?
+  slot    BatchSessionSlot? @relation(fields: [slotId], references: [id])
+
+  subject String
+  body    String // rendered HTML/text — kept for admin visibility & dev debugging
+  status  String  @default("sent") // sent | sent_no_sentfolder | simulated | failed | skipped_no_email
+  error   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([slotId])
+  @@index([toUserId])
+  @@index([kind])
+}

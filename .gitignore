@@ -36,6 +36,15 @@ yarn-error.log*
 # vercel
 .vercel
 
+# local database (contains real trainee data — never commit)
+/prisma/*.db
+/prisma/*.db-journal
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Real roster data — contains staff emails and initial passwords
+people.csv
+prisma/*.db
+prisma/*.db-journal

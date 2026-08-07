@@ -1,26 +1,93 @@
 @import "tailwindcss";
 
+/* ---- Founders Mentality Portal — slate/indigo editorial design system ---- */
+
+@theme {
+  --color-canvas: #eef1f6; /* cool slate page */
+  --color-paper: #ffffff; /* card surface */
+  --color-paper-2: #f4f6fa; /* recessed surface */
+  --color-ink: #1a2233; /* deep slate text */
+  --color-muted: #5a6478; /* secondary text */
+  --color-faint: #8b93a7; /* hints / metadata */
+  --color-line: #dde2ec; /* cool hairline */
+  --color-line-strong: #c7cee0;
+
+  --color-indigo: #2f3f8f; /* primary — leadership indigo */
+  --color-indigo-deep: #232f6c;
+  --color-slate: #2e3757;
+  --color-amber: #b0790e; /* accent — growth/energy */
+  --color-teal: #1f6f66;
+  --color-rose: #a23a4a;
+
+  --color-success: #1f6f66;
+  --color-danger: #a23a2c;
+
+  --font-display: var(--font-fraunces);
+  --font-sans: var(--font-inter);
+
+  --radius-card: 14px;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
+  --shadow-card: 0 1px 2px rgba(26, 34, 51, 0.05), 0 10px 24px -12px rgba(26, 34, 51, 0.14);
+  --shadow-card-hover: 0 6px 16px -6px rgba(26, 34, 51, 0.1), 0 24px 48px -18px rgba(26, 34, 51, 0.22);
+  --shadow-soft: 0 1px 2px rgba(26, 34, 51, 0.04), 0 4px 12px -6px rgba(26, 34, 51, 0.1);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+* {
+  border-color: var(--color-line);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-indigo) 22%, transparent);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+:where(a, button, input, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-indigo);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-in {
+  animation: fade-in-up 0.45s ease both;
 }
