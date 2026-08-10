@@ -9,7 +9,7 @@ import * as XLSX from "xlsx";
 import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 
-export async function GET() {
+export async function GET(request: Request) {
   const sessionUser = await getCurrentUser();
   if (!sessionUser || sessionUser.role !== "admin") {
     return new Response("Not authorized.", { status: 403 });
@@ -18,10 +18,18 @@ export async function GET() {
   const me = await db.user.findUnique({ where: { id: sessionUser.id } });
   if (!me) return new Response("Not authorized.", { status: 403 });
 
+  // Optional per-batch scope — narrows WHICH sessions are considered, but never who's
+  // allowed to see them. A regular admin asking for a batch they don't facilitate still
+  // gets an empty report, same as the unscoped export.
+  const batchId = new URL(request.url).searchParams.get("batchId");
+  const scopedBatch = batchId ? await db.batch.findUnique({ where: { id: batchId }, select: { name: true } }) : null;
+  if (batchId && !scopedBatch) return new Response("Batch not found.", { status: 404 });
+
   // `active: true` deliberately omitted — a revoked facilitator's past sessions should
   // still show their name in the export, unlike the "assign facilitator" dropdown.
   const [batches, admins] = await Promise.all([
     db.batch.findMany({
+      where: batchId ? { id: batchId } : undefined,
       include: { slots: { orderBy: { index: "asc" } } },
     }),
     db.user.findMany({ where: { role: "admin" }, select: { id: true, name: true, email: true } }),
@@ -113,7 +121,8 @@ export async function GET() {
   const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer;
 
   const who = me.isSuperAdmin ? "all-facilitators" : me.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-  const filename = `facilitator-report-${who}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  const scope = scopedBatch ? `-${scopedBatch.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}` : "";
+  const filename = `facilitator-report-${who}${scope}-${new Date().toISOString().slice(0, 10)}.xlsx`;
 
   return new Response(new Uint8Array(buffer), {
     headers: {

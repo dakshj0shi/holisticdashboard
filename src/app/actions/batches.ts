@@ -92,6 +92,22 @@ export async function updateBatch(
   return { ok: true };
 }
 
+export async function updateBatchDescription(
+  batchId: string,
+  _prev: unknown,
+  formData: FormData,
+): Promise<{ ok: boolean; error?: string }> {
+  const user = await getCurrentUser();
+  if (!user || user.role !== "admin") return { ok: false, error: "Not authorized." };
+
+  const description = String(formData.get("description") ?? "").trim() || null;
+
+  const batch = await db.batch.update({ where: { id: batchId }, data: { description } });
+  await logEvent(user.id, "batch_update", `${batch.name} — description updated`);
+  revalidatePath(`/admin/batches/${batchId}`);
+  return { ok: true };
+}
+
 // Hard delete — schema.prisma cascades remove this batch's session slots and worksheet
 // assignments (and their submissions/answers) automatically; trainees in the batch are
 // NOT deleted, only unassigned (User.batchId is set to null). Irreversible for the

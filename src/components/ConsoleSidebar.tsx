@@ -28,7 +28,7 @@ const NAV: { section: string; items: { href: string; label: string; Icon: typeof
     section: "System",
     items: [
       { href: "/admin/activity", label: "Activity log", Icon: Pulse },
-      { href: "/admin/import", label: "Import Excel", Icon: Upload },
+      { href: "/admin/import", label: "Import & Export", Icon: Upload },
     ],
   },
 ];

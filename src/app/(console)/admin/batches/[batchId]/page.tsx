@@ -7,11 +7,13 @@ import { TraineeForm } from "@/components/TraineeForm";
 import { ScheduleSlotForm } from "@/components/ScheduleSlotForm";
 import { ObservationGrid } from "@/components/ObservationGrid";
 import { BatchEditForm } from "@/components/BatchEditForm";
+import { BatchDescriptionForm } from "@/components/BatchDescriptionForm";
+import { RosterImportForm } from "@/components/RosterImportForm";
 import { SessionSummaryForm } from "@/components/SessionSummaryForm";
 import { suggestNextSessionDate } from "@/lib/scheduling";
 import { Calendar, Users, Clipboard } from "@/components/Icons";
 
-const TABS = ["sessions", "trainees", "settings"] as const;
+const TABS = ["sessions", "trainees", "description", "settings"] as const;
 
 export default async function BatchDetailPage({ params, searchParams }: PageProps<"/admin/batches/[batchId]">) {
   const [{ batchId }, sp] = await Promise.all([params, searchParams]);
@@ -67,6 +69,7 @@ export default async function BatchDetailPage({ params, searchParams }: PageProp
         tabs={[
           { key: "sessions", href: base, label: "Sessions", badge: batch.sessionCount },
           { key: "trainees", href: `${base}?tab=trainees`, label: "Trainees", badge: batch.trainees.length },
+          { key: "description", href: `${base}?tab=description`, label: "Description" },
           { key: "settings", href: `${base}?tab=settings`, label: "Settings" },
         ]}
       />
@@ -146,19 +149,51 @@ export default async function BatchDetailPage({ params, searchParams }: PageProp
         </div>
       )}
 
-      {tab === "settings" && (
-        <Panel title="Batch settings" hint="Change the name, session count, or facilitator">
-          <BatchEditForm
-            batch={{
-              id: batch.id,
-              name: batch.name,
-              sessionCount: batch.sessionCount,
-              traineeCount: batch.trainees.length,
-              facilitatorId: batch.facilitatorId,
-            }}
-            facilitators={facilitators}
-          />
+      {tab === "description" && (
+        <Panel title="About this batch" hint="Freeform notes — goals, audience, anything worth flagging">
+          <BatchDescriptionForm batchId={batch.id} description={batch.description} />
         </Panel>
+      )}
+
+      {tab === "settings" && (
+        <div className="space-y-6">
+          <Panel title="Batch settings" hint="Change the name, session count, or facilitator">
+            <BatchEditForm
+              batch={{
+                id: batch.id,
+                name: batch.name,
+                sessionCount: batch.sessionCount,
+                traineeCount: batch.trainees.length,
+                facilitatorId: batch.facilitatorId,
+              }}
+              facilitators={facilitators}
+            />
+          </Panel>
+
+          <Panel title="Export this batch" hint="Excel downloads scoped to just this batch">
+            <div className="flex flex-wrap gap-3">
+              <a
+                href={`/api/export/roster?batchId=${batch.id}`}
+                className="rounded-lg border border-line-strong px-4 py-2 text-sm font-medium text-ink hover:bg-paper-2"
+              >
+                Export trainee roster
+              </a>
+              <a
+                href={`/api/export/facilitators?batchId=${batch.id}`}
+                className="rounded-lg border border-line-strong px-4 py-2 text-sm font-medium text-ink hover:bg-paper-2"
+              >
+                Export facilitator report
+              </a>
+            </div>
+          </Panel>
+
+          <Panel
+            title="Import roster into this batch"
+            hint='Name, Email, Department, S1..Sn, "1:1 Note" — matches the roster export above'
+          >
+            <RosterImportForm batchId={batch.id} />
+          </Panel>
+        </div>
       )}
     </div>
   );

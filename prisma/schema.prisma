@@ -80,6 +80,7 @@ model Batch {
   name         String // "BATCH A", "BATCH 1", etc.
   program      String   @default("founders-mentality") // founders-mentality | facilitator-workshop
   sessionCount Int // variable per program — not hardcoded to 8
+  description  String? // freeform notes about this batch, editable in its own tab
   createdAt    DateTime @default(now())
 
   // Current facilitator for this batch — changeable only from the batch detail page.

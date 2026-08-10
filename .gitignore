@@ -48,3 +48,6 @@ next-env.d.ts
 people.csv
 prisma/*.db
 prisma/*.db-journal
+
+# Database copies made for sharing/migration — real trainee PII, never commit
+/exports/
