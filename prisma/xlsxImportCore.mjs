@@ -6,6 +6,7 @@ import * as XLSX from "xlsx";
 const SHEET1_LAYOUT = {
   program: "founders-mentality",
   nameCol: 0,
+  emailCol: 1,
   deptCol: 2,
   sessionCols: [3, 4, 5, 6, 7, 8, 9, 10],
   oneOnOneCol: 12,
@@ -15,11 +16,14 @@ const SHEET1_LAYOUT = {
 const SHEET2_LAYOUT = {
   program: "facilitator-workshop",
   nameCol: 0,
+  emailCol: null,
   deptCol: 1,
   sessionCols: [2, 3],
   oneOnOneCol: null,
   observationCols: [],
 };
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function isBatchLabelRow(cell) {
   return typeof cell === "string" && cell.trim().toUpperCase().startsWith("BATCH");
@@ -125,17 +129,36 @@ export async function runImport(db, fileBuffer) {
       const department = layout.deptCol !== null ? row[layout.deptCol]?.toString().trim() || null : null;
       const oneOnOneNote =
         layout.oneOnOneCol !== null ? row[layout.oneOnOneCol]?.toString().trim() || null : null;
+      const emailRaw = layout.emailCol !== null ? row[layout.emailCol]?.toString().trim().toLowerCase() || null : null;
+      const email = emailRaw && EMAIL_RE.test(emailRaw) ? emailRaw : null;
 
       let user = await db.user.findFirst({ where: { name, batchId: currentBatchId } });
+
+      // Never clobber an existing email with the sheet's — only fill it in when missing,
+      // and never steal an email another account already owns (email is unique on User).
+      let emailToSet = null;
+      if (email && (!user || !user.email)) {
+        const owner = await db.user.findUnique({ where: { email } });
+        if (owner && owner.id !== user?.id) {
+          warnings.push(`${name}: email ${email} is already used by another account — left unset.`);
+        } else {
+          emailToSet = email;
+        }
+      }
+
       if (!user) {
         user = await db.user.create({
-          data: { name, department, batchId: currentBatchId, role: "trainee", email: null, passwordHash: null, oneOnOneNote },
+          data: { name, department, batchId: currentBatchId, role: "trainee", email: emailToSet, passwordHash: null, oneOnOneNote },
         });
         traineesImported++;
       } else {
         await db.user.update({
           where: { id: user.id },
-          data: { department, oneOnOneNote: oneOnOneNote ?? user.oneOnOneNote },
+          data: {
+            department,
+            oneOnOneNote: oneOnOneNote ?? user.oneOnOneNote,
+            email: emailToSet ?? user.email,
+          },
         });
       }
 
