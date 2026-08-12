@@ -89,7 +89,10 @@ export async function createSession(userId: string, mailPassword?: string) {
   jar.set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    // ponytail: server runs on plain HTTP — `secure` cookies are silently dropped by
+    // browsers over HTTP, which is what broke every login/import. Flip to
+    // `process.env.NODE_ENV === "production"` once the server is behind HTTPS.
+    secure: false,
     path: "/",
     expires: expiresAt,
   });
