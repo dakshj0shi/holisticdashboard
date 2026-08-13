@@ -13,6 +13,7 @@ export async function logEvent(userId: string, type: string, detail?: string) {
 export const EVENT_LABEL: Record<string, string> = {
   login: "Signed in",
   logout: "Signed out",
+  password_change: "Changed password",
   batch_create: "Created batch",
   batch_update: "Updated batch",
   trainee_create: "Added trainee",

@@ -28,6 +28,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             { key: "schedule", href: "/schedule", label: "Schedule" },
             { key: "worksheets", href: "/worksheets", label: "Worksheets", badge: pendingCount },
             { key: "results", href: "/results", label: "My results" },
+            { key: "account", href: "/account", label: "Account" },
           ]}
         />
         {children}
