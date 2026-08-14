@@ -60,6 +60,36 @@ export async function rescheduleSessionSlot(
   return { ok: true };
 }
 
+// Fixing a data-entry error (usually a wrong date off the Excel import), NOT a real
+// schedule change: writes the date and nothing else — no conflict check (past sessions
+// across batches legitimately share days), no status change, no email. Use
+// rescheduleSessionSlot when the date genuinely moved and trainees must be told.
+export async function correctSessionDate(
+  slotId: string,
+  dateStr: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const user = await getCurrentUser();
+  if (!user || user.role !== "admin") return { ok: false, error: "Not authorized." };
+
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return { ok: false, error: "Enter a valid date." };
+
+  const existing = await db.batchSessionSlot.findUnique({ where: { id: slotId } });
+  if (!existing) return { ok: false, error: "Session not found." };
+
+  const slot = await db.batchSessionSlot.update({
+    where: { id: slotId },
+    // Backfilling a date onto a never-scheduled slot has to move it off "unscheduled",
+    // or the summary form and the scheduled/total counts stay out of sync with reality.
+    data: { scheduledDate: date, status: existing.status === "unscheduled" ? "scheduled" : existing.status },
+  });
+
+  await logEvent(user.id, "session_date_correct", `Session ${slot.index} date corrected to ${date.toDateString()}`);
+  revalidatePath(`/admin/batches/${slot.batchId}`);
+  revalidatePath("/dashboard");
+  return { ok: true };
+}
+
 export async function sendSessionSummary(
   slotId: string,
   _prev: unknown,

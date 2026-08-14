@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { scheduleSessionSlot, rescheduleSessionSlot } from "@/app/actions";
+import { scheduleSessionSlot, rescheduleSessionSlot, correctSessionDate } from "@/app/actions";
 
 type Slot = {
   id: string;
@@ -40,6 +40,20 @@ export function ScheduleSlotForm({ slot, suggestedDate }: { slot: Slot; suggeste
     });
   }
 
+  function fixDate() {
+    setError(null);
+    setDone(null);
+    setNeedsConfirm(false);
+    startTransition(async () => {
+      const result = await correctSessionDate(slot.id, date);
+      if (!result.ok) {
+        setError(result.error ?? "Something went wrong.");
+        return;
+      }
+      setDone("Date changed — no email sent.");
+    });
+  }
+
   return (
     <div className="flex flex-wrap items-center gap-2">
       <input
@@ -59,6 +73,16 @@ export function ScheduleSlotForm({ slot, suggestedDate }: { slot: Slot; suggeste
         className="rounded-lg bg-indigo px-3 py-1.5 text-sm font-medium text-paper transition-colors hover:bg-indigo-deep disabled:opacity-60"
       >
         {pending ? "Sending…" : isFirstSchedule ? "Schedule" : "Reschedule"}
+      </button>
+
+      <button
+        type="button"
+        disabled={pending || !date}
+        onClick={fixDate}
+        title="Overwrite the date without emailing anyone — for fixing a wrong date on a past session"
+        className="rounded-lg border border-line-strong px-3 py-1.5 text-sm text-muted transition-colors hover:bg-paper-2 disabled:opacity-60"
+      >
+        Change date (no email)
       </button>
 
       {isFirstSchedule && suggestedDate && date === suggestedDate && (

@@ -21,6 +21,7 @@ export const EVENT_LABEL: Record<string, string> = {
   trainee_update: "Updated trainee",
   session_schedule: "Scheduled session",
   session_reschedule: "Rescheduled session",
+  session_date_correct: "Corrected session date",
   session_complete: "Marked session complete",
   observation_save: "Saved observation",
   worksheet_create: "Created worksheet",
