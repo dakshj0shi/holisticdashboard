@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { loadBatches } from "@/app/actions";
+import { loadBatches, loadPrograms } from "@/app/actions";
 import { BatchForm } from "@/components/BatchForm";
 import { Panel } from "@/components/Charts";
 import { suggestNextSessionDate } from "@/lib/scheduling";
@@ -11,7 +11,7 @@ function formatDate(d: Date) {
 }
 
 export default async function BatchesPage() {
-  const [batches, user] = await Promise.all([loadBatches(), getCurrentUser()]);
+  const [batches, user, programs] = await Promise.all([loadBatches(), getCurrentUser(), loadPrograms()]);
   const isSuperAdmin = user ? (await db.user.findUnique({ where: { id: user.id } }))?.isSuperAdmin ?? false : false;
 
   return (
@@ -29,7 +29,7 @@ export default async function BatchesPage() {
 
       <div className="mb-6">
         <Panel title="New batch">
-          <BatchForm />
+          <BatchForm programs={programs} />
         </Panel>
       </div>
 

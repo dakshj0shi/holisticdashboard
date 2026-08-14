@@ -17,6 +17,7 @@ export const EVENT_LABEL: Record<string, string> = {
   batch_create: "Created batch",
   batch_update: "Updated batch",
   trainee_create: "Added trainee",
+  facilitator_create: "Added facilitator",
   trainee_update: "Updated trainee",
   session_schedule: "Scheduled session",
   session_reschedule: "Rescheduled session",

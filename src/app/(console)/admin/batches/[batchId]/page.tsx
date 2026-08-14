@@ -7,6 +7,7 @@ import { TraineeForm } from "@/components/TraineeForm";
 import { ScheduleSlotForm } from "@/components/ScheduleSlotForm";
 import { ObservationGrid } from "@/components/ObservationGrid";
 import { BatchEditForm } from "@/components/BatchEditForm";
+import { AddFacilitatorForm } from "@/components/AddFacilitatorForm";
 import { BatchDescriptionForm } from "@/components/BatchDescriptionForm";
 import { RosterImportForm } from "@/components/RosterImportForm";
 import { SessionSummaryForm } from "@/components/SessionSummaryForm";
@@ -168,6 +169,10 @@ export default async function BatchDetailPage({ params, searchParams }: PageProp
               }}
               facilitators={facilitators}
             />
+          </Panel>
+
+          <Panel title="New facilitator" hint="Not in the list above? Add them — they log in with their Jaipur Rugs mailbox">
+            <AddFacilitatorForm batchId={batch.id} />
           </Panel>
 
           <Panel title="Export this batch" hint="Excel downloads scoped to just this batch">

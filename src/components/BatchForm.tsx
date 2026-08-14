@@ -5,8 +5,9 @@ import { createBatch } from "@/app/actions";
 
 const initial: { ok: boolean; error?: string } = { ok: false };
 
-export function BatchForm() {
+export function BatchForm({ programs }: { programs: string[] }) {
   const [state, action, pending] = useActionState(createBatch, initial);
+  const options = Array.from(new Set(["founders-mentality", "facilitator-workshop", ...programs])).sort();
 
   return (
     <form action={action} className="flex flex-wrap items-end gap-3">
@@ -21,13 +22,19 @@ export function BatchForm() {
       </div>
       <div className="space-y-1">
         <label className="block text-xs font-medium text-muted">Program</label>
-        <select
+        <input
           name="program"
-          className="w-52 rounded-lg border border-line-strong bg-paper px-3 py-2 text-sm text-ink focus:border-indigo focus:outline-none"
-        >
-          <option value="founders-mentality">Founders Mentality</option>
-          <option value="facilitator-workshop">Facilitator Workshop</option>
-        </select>
+          list="program-options"
+          required
+          defaultValue="founders-mentality"
+          placeholder="Type to add a new program"
+          className="w-52 rounded-lg border border-line-strong bg-paper px-3 py-2 text-sm text-ink placeholder:text-faint focus:border-indigo focus:outline-none"
+        />
+        <datalist id="program-options">
+          {options.map((p) => (
+            <option key={p} value={p} />
+          ))}
+        </datalist>
       </div>
       <div className="space-y-1">
         <label className="block text-xs font-medium text-muted">Sessions</label>

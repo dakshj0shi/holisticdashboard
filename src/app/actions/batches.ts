@@ -148,6 +148,14 @@ export async function loadBatch(batchId: string) {
   });
 }
 
+// Distinct program names already in use, so the batch form can offer them
+// as suggestions while still accepting a brand-new one (program is a plain
+// String column — no migration needed to add a program).
+export async function loadPrograms() {
+  const rows = await db.batch.findMany({ select: { program: true }, distinct: ["program"] });
+  return rows.map((r) => r.program).sort();
+}
+
 // Admins who can be assigned as a batch facilitator.
 export async function loadFacilitatorOptions() {
   return db.user.findMany({
@@ -155,4 +163,30 @@ export async function loadFacilitatorOptions() {
     orderBy: { name: "asc" },
     select: { id: true, name: true, email: true },
   });
+}
+
+// New facilitators are just admins — they log in with their real mailbox password like
+// any other admin (see auth.ts), so no password is set here. batchId is only used to
+// revalidate the page this was submitted from.
+export async function createFacilitator(
+  batchId: string,
+  _prev: unknown,
+  formData: FormData,
+): Promise<{ ok: boolean; error?: string }> {
+  const user = await getCurrentUser();
+  requireAdmin(user);
+
+  const name = String(formData.get("name") ?? "").trim();
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+
+  if (!name || !email) return { ok: false, error: "Enter a name and email." };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: "Not a valid email." };
+
+  const existing = await db.user.findUnique({ where: { email } });
+  if (existing) return { ok: false, error: "A user with this email already exists." };
+
+  await db.user.create({ data: { name, email, role: "admin", active: true } });
+  await logEvent(user!.id, "facilitator_create", `${name} (${email})`);
+  revalidatePath(`/admin/batches/${batchId}`);
+  return { ok: true };
 }
