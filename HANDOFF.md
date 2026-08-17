@@ -211,6 +211,21 @@ happened *and* flip a completed session back to `rescheduled`. It's wired to the
 **"Change date (no email)"** button on every session row. Use it for data-entry
 fixes only.
 
+#### Fixing wrong dates — do it in this order
+
+The tracker spreadsheet has a recurring typo where a year is entered as `27`
+instead of `26`, so the import lands sessions a year out. Two tools, cheapest first:
+
+1. **Bulk, scripted** — `npm run fix:years -- --dry-run`, read the output, then run it
+   for real. It shifts 2027→2026 only where doing so keeps that batch's sessions in
+   ascending order; anything genuinely booked far ahead is reported and left untouched.
+   This handles the majority in one pass.
+2. **Individually, in the UI** — for whatever the script deliberately skipped, or any
+   date wrong in some other way, use **"Change date (no email)"** on the session row.
+
+Neither path emails anyone. Remember the server has its own database — run step 1
+there too, after sourcing `.env.production` (§4).
+
 Slot status lifecycle: `unscheduled → scheduled → rescheduled → completed`.
 **`completed` is set in exactly one place** — `sendSlotSummary`, when the recap email
 goes out. That's also the moment `BatchSessionSlot.facilitatorId` is snapshotted from
