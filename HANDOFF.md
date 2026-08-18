@@ -97,6 +97,14 @@ Deploy:
 git pull && npm run build && pm2 restart holistic-dashboard --update-env
 ```
 
+If the pull brought a new folder into `prisma/migrations/`, apply it before restarting —
+the server database is its own file and `git pull` does not touch data:
+
+```bash
+set -a; source .env.production; set +a
+npm run db:migrate
+```
+
 ### Deployment traps (all of these cost us hours)
 
 - **`--update-env` is not optional.** Without it PM2 reuses a stale env snapshot and
@@ -236,6 +244,31 @@ Every send is written to `EmailLog` with a status: `sent`, `sent_no_sentfolder`,
 `simulated`, `failed`, `skipped_no_email`. Trainees with no email get `skipped_no_email`
 rather than blowing up the send — hence the "missing email" counters in the UI.
 
+#### The wording of those emails
+
+All three automated sends are editable in the UI at **Emails → Templates**. The built-in
+text lives in `src/lib/emailTemplates.ts`; an `EmailTemplate` row (keyed by the same
+string as `EmailLog.kind`) overrides one. **No row means "never edited"**, so a fresh or
+reset database sends exactly what the portal always sent, and "Restore default" is just
+re-saving that built-in text.
+
+Bodies are plain text with `{{name}}` `{{batch}}` `{{session}}` `{{date}}` `{{summary}}`
+placeholders. Blank lines become paragraph breaks; inline tags like `<strong>` pass
+through. A placeholder that template doesn't have is **rejected on save** rather than
+mailed to a whole batch verbatim — `{{summary}}` exists only on the summary template.
+
+`emailTemplates.ts` deliberately has no `server-only` and no `db` import, so the editor's
+preview can call the same `renderTemplate()` the mailer uses — the preview *is* the
+email. Values substituted into the HTML part are HTML-escaped. `npm run check:templates`
+pins the defaults to the exact text and markup that went out before templates existed, so
+editing those defaults can't silently change what trainees receive.
+
+One deliberate difference from the pre-template version: "New date:" is no longer wrapped
+in `<strong>`. Put the tag back in the template if you want it.
+
+The **Sent log** tab expands each row's subject to show the body as sent — that, plus the
+preview, is how you check what is actually going out.
+
 ### Excel import (`prisma/xlsxImportCore.mjs`)
 
 Shared by the CLI (`npm run import`) and the in-app admin upload, so a fix in the core
@@ -276,6 +309,7 @@ All in `prisma/`, run with `npm run <name>` or `node prisma/<file>`.
 | `npm run demo` / `npm run mock` | Seed demo/mock data |
 | `npm run reset` | **Wipes the DB.** |
 | `npm run check:mail` | Verify SMTP/IMAP connectivity |
+| `npm run check:templates` | Self-check the email template renderer. No DB, no network — safe anywhere. |
 
 Facilitators can also be added from the UI now: **batch → Settings tab → "New
 facilitator"** panel. Same effect as the CLI (allowlist an email as `role: "admin"`),

@@ -29,6 +29,7 @@ export const EVENT_LABEL: Record<string, string> = {
   worksheet_submit: "Submitted worksheet",
   import_run: "Ran Excel import",
   custom_email_send: "Sent custom email",
+  email_template_update: "Edited email template",
 };
 
 export type ActivityRow = {

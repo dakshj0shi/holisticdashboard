@@ -234,3 +234,14 @@ model EmailLog {
   @@index([toUserId])
   @@index([kind])
 }
+
+// Admin-editable wording for the automated sends, edited at /admin/emails/templates.
+// `key` matches EmailLog.kind. A missing row means "never edited" and the built-in
+// default in src/lib/emailTemplates.ts is used, so a fresh database sends exactly what
+// the portal always sent. custom_ai has no row — that one is written per send.
+model EmailTemplate {
+  key       String   @id // session_scheduled | session_rescheduled | session_summary
+  subject   String
+  body      String // plain text with {{token}} placeholders — see emailTemplates.ts
+  updatedAt DateTime @updatedAt
+}

@@ -1,6 +1,14 @@
 import "server-only";
 import { db } from "./db";
 import { sendMailAsAdmin } from "./mailer";
+import { DEFAULTS, renderTemplate, type Template, type TemplateKind } from "./emailTemplates";
+
+// The admin-edited wording for a send, falling back to the built-in default when this
+// template has never been touched.
+async function loadTemplate(kind: TemplateKind): Promise<Template> {
+  const row = await db.emailTemplate.findUnique({ where: { key: kind } });
+  return row ?? DEFAULTS[kind];
+}
 
 function formatDate(d: Date) {
   return d.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
@@ -18,19 +26,15 @@ async function notifyBatch(opts: {
   const { slot, batchName, date, kind, adminUserId, adminEmail, adminPassword } = opts;
   const trainees = await db.user.findMany({ where: { batchId: slot.batchId, role: "trainee", active: true } });
 
-  const subject =
-    kind === "session_scheduled"
-      ? `${batchName} — Session ${slot.index} scheduled for ${formatDate(date)}`
-      : `${batchName} — Session ${slot.index} rescheduled to ${formatDate(date)}`;
-
-  const intro =
-    kind === "session_scheduled"
-      ? `Session ${slot.index} for ${batchName} has been scheduled.`
-      : `Sorry for the change — Session ${slot.index} for ${batchName} has a new date.`;
+  const tpl = await loadTemplate(kind);
 
   for (const t of trainees) {
-    const text = `Hi ${t.name},\n\n${intro}\n\nNew date: ${formatDate(date)}\n\n— Founders Mentality Program`;
-    const html = `<p>Hi ${t.name},</p><p>${intro}</p><p><strong>New date:</strong> ${formatDate(date)}</p><p>— Founders Mentality Program</p>`;
+    const { subject, html, text } = renderTemplate(tpl, {
+      name: t.name,
+      batch: batchName,
+      session: String(slot.index),
+      date: formatDate(date),
+    });
 
     await sendMailAsAdmin({
       adminEmail,
@@ -150,11 +154,15 @@ export async function sendSlotSummary(
   if (slot.status === "unscheduled") return { ok: false, error: "Schedule this session before sending a summary." };
 
   const trainees = await db.user.findMany({ where: { batchId: slot.batchId, role: "trainee", active: true } });
-  const subject = `${slot.batch.name} — Session ${slot.index} summary`;
+  const tpl = await loadTemplate("session_summary");
 
   for (const t of trainees) {
-    const text = `Hi ${t.name},\n\nHere's a recap of Session ${slot.index} for ${slot.batch.name}:\n\n${summary}\n\n— Founders Mentality Program`;
-    const html = `<p>Hi ${t.name},</p><p>Here's a recap of Session ${slot.index} for ${slot.batch.name}:</p><p>${summary.replace(/\n/g, "<br/>")}</p><p>— Founders Mentality Program</p>`;
+    const { subject, html, text } = renderTemplate(tpl, {
+      name: t.name,
+      batch: slot.batch.name,
+      session: String(slot.index),
+      summary,
+    });
 
     await sendMailAsAdmin({
       adminEmail: admin.email,

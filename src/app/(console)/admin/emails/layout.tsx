@@ -8,13 +8,15 @@ export default async function EmailsLayout({ children }: { children: React.React
     <div>
       <h1 className="font-display text-3xl text-ink">Emails</h1>
       <p className="mt-1 mb-6 text-muted">
-        Send a custom message, or review every scheduling, rescheduling, and summary send.
+        Read exactly what went out, edit the wording of the automated sends, or write a one-off
+        message.
       </p>
 
       <RouteTabs
         tabs={[
           { key: "log", href: "/admin/emails", label: "Sent log", badge: total },
           { key: "compose", href: "/admin/emails/compose", label: "Compose with AI" },
+          { key: "templates", href: "/admin/emails/templates", label: "Templates" },
         ]}
       />
 

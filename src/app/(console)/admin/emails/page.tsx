@@ -10,6 +10,20 @@ const STATUS_STYLE: Record<string, string> = {
   skipped_no_email: "bg-paper-2 text-faint",
 };
 
+// The log stores each email's rendered HTML. Show it as the words a trainee actually
+// read rather than as markup — this table is where you check what went out.
+function asText(html: string) {
+  return html
+    .replace(/<\/p>|<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, "&")
+    .trim();
+}
+
 export default async function EmailsPage({ searchParams }: PageProps<"/admin/emails">) {
   const sp = await searchParams;
   const status = typeof sp.status === "string" ? sp.status : undefined;
@@ -41,7 +55,10 @@ export default async function EmailsPage({ searchParams }: PageProps<"/admin/ema
         <StatTile label="Failed" value={failedCount} />
       </div>
 
-      <Panel title={`Log (${logs.length}${status || kind ? " filtered" : ""})`}>
+      <Panel
+        title={`Log (${logs.length}${status || kind ? " filtered" : ""})`}
+        hint="Click a subject to read the message that was sent"
+      >
         {logs.length === 0 ? (
           <p className="text-sm text-muted">No emails logged yet — schedule a session to see one here.</p>
         ) : (
@@ -64,7 +81,14 @@ export default async function EmailsPage({ searchParams }: PageProps<"/admin/ema
                       {l.toUser.name} <span className="text-faint">{l.toEmail && `<${l.toEmail}>`}</span>
                     </td>
                     <td className="py-2 pr-4 text-muted">{l.kind}</td>
-                    <td className="py-2 pr-4 text-ink">{l.subject}</td>
+                    <td className="py-2 pr-4 text-ink">
+                      <details>
+                        <summary className="cursor-pointer marker:text-faint">{l.subject}</summary>
+                        <p className="mt-2 max-w-xl whitespace-pre-wrap rounded-lg border border-line bg-paper-2 p-3 text-[13px] leading-relaxed text-muted">
+                          {asText(l.body)}
+                        </p>
+                      </details>
+                    </td>
                     <td className="py-2 pr-4">
                       <span className={`rounded-full px-2 py-0.5 text-xs ${STATUS_STYLE[l.status] ?? "bg-paper-2 text-faint"}`}>
                         {l.status}
