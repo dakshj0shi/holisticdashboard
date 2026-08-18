@@ -81,14 +81,24 @@ const name = nameParts.join(" ").trim();
 if (!email || !name) fail('Usage: node prisma/add-admin.mjs <email> "Full Name" [--dev-password <pw>] [--super]');
 if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(`"${email}" doesn't look like an email address.`);
 
-const data = { name, role: "admin", active: true };
+const data = { name, role: "admin", active: true, batchId: null };
 if (devPassword) data.passwordHash = await bcrypt.hash(devPassword, 10);
 if (makeSuper) data.isSuperAdmin = true; // never demotes automatically — see header comment
 
 const existing = await db.user.findUnique({ where: { email } });
 
 if (existing) {
-  await db.user.update({ where: { email }, data });
+  const promoting = existing.role !== "admin";
+  // Promotion also detaches them from any batch (batchId above) and drops the trainee
+  // bcrypt hash — admins authenticate against the mail server, so a leftover local
+  // password is a credential nobody is managing. --dev-password still wins if passed.
+  await db.user.update({
+    where: { email },
+    data: promoting ? { ...data, passwordHash: data.passwordHash ?? null } : data,
+  });
+  // Their old trainee session carries no mailbox credential and so cannot send mail as
+  // an admin — end it and make them sign in again. Session records and events stay.
+  if (promoting) await db.session.deleteMany({ where: { userId: existing.id } });
   console.log(
     existing.role === "admin"
       ? `Updated existing admin ${email}.`
