@@ -11,11 +11,25 @@ function mailConfigured() {
 }
 
 function smtpTransport(email: string, password: string) {
+  const port = Number(process.env.MAIL_SMTP_PORT ?? 465);
   return nodemailer.createTransport({
     host: process.env.MAIL_HOST,
-    port: Number(process.env.MAIL_SMTP_PORT ?? 465),
-    secure: true, // SSL/TLS, matches the org's Outlook settings (port 465)
+    port,
+    // 465 is implicit TLS; 587 starts plaintext and upgrades via STARTTLS, so `secure`
+    // must track the port — leaving it true on 587 hangs until connectionTimeout.
+    // requireTLS keeps that upgrade mandatory, so a server without STARTTLS fails
+    // rather than sending the mailbox password in the clear.
+    secure: port === 465,
+    requireTLS: port !== 465,
     auth: { user: email, pass: password },
+    // Admin login runs through this transport, so without explicit timeouts nodemailer
+    // waits out its own defaults (30s greeting, 2min connect, 10min socket) and the
+    // sign-in form just spins for two minutes before reporting "wrong password". A
+    // firewall that DROPs rather than rejects looks exactly like this. 10s matches the
+    // port probe in scripts/check-mail.mjs.
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 20_000,
   });
 }
 
@@ -26,18 +40,49 @@ export async function verifyMailCredentials(email: string, password: string): Pr
     const transport = smtpTransport(email, password);
     await transport.verify();
     return true;
-  } catch {
+  } catch (e) {
+    // A refused password and an unreachable mail server both reach the user as "wrong
+    // email or password". Record which it actually was — the codes differ (EAUTH vs
+    // ETIMEDOUT / ECONNECTION / ESOCKET), and not being able to tell them apart turned
+    // a firewall change into a six-day hunt. Never log the password.
+    const code = (e as { code?: string }).code ?? "unknown";
+    console.warn(`[mail] verify failed for ${email}: ${code} - ${String(e).slice(0, 200)}`);
     return false;
   }
 }
 
+/* One IMAP connection at a time, with a gap between them.
+   Every send opens its own connection to file a copy in the Sent folder, so a batch of
+   rescheduling emails fires them all simultaneously and the server starts refusing
+   partway through: the mail goes out but the Sent copy silently doesn't. The merchant
+   email tool hit this on the same server and fixed it the same way.
+   ponytail: a single in-process promise chain, not a real queue. Fine while one Next
+   process does the sending; needs a shared lock if this ever runs multi-instance. */
+const IMAP_GAP_MS = 500;
+let imapChain: Promise<unknown> = Promise.resolve();
+
+function queueImap<T>(task: () => Promise<T>): Promise<T> {
+  const gap = () => new Promise((r) => setTimeout(r, IMAP_GAP_MS));
+  const run = imapChain.then(task, task);
+  // Chain on both outcomes: one rejection would otherwise wedge every later append
+  // behind a permanently failed promise.
+  imapChain = run.then(gap, gap);
+  return run;
+}
+
 async function appendToSent(email: string, password: string, raw: Buffer): Promise<boolean> {
+  return queueImap(() => appendToSentNow(email, password, raw));
+}
+
+async function appendToSentNow(email: string, password: string, raw: Buffer): Promise<boolean> {
   const client = new ImapFlow({
     host: process.env.MAIL_HOST!,
     port: Number(process.env.MAIL_IMAP_PORT ?? 993),
     secure: true,
     auth: { user: email, pass: password },
     logger: false,
+    greetingTimeout: 10_000,
+    socketTimeout: 20_000,
   });
   try {
     await client.connect();

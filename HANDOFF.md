@@ -352,3 +352,61 @@ trainees' self-chosen passwords later.
 - `correctSessionDate` leaves `notifiedAt` / `notifiedForDate` pointing at the old date.
   Harmless today — they only feed the duplicate-send guard — but worth knowing.
 - No automated tests. Verification is manual through the running app.
+
+---
+
+## 11. The mail path — and the 2026-08-13 lockout
+
+Admin login opens a live SMTP connection (§5). That makes the **network path to the
+mail server part of the auth path**, and on 2026-08-13 it broke:
+
+- The firewall stopped permitting `192.168.0.0/24` (this server, `192.168.0.82`) to
+  reach `mail.jaipurrugs.com` = `202.131.121.138`. All ports: 465, 587, 993.
+- A laptop on `192.168.5.0/24` reached the same IP and port fine throughout, so the
+  mail server itself was never at fault.
+- Symptom: **every admin login hung ~2 minutes then said "wrong email or password".**
+  Trainees were unaffected — their passwords are compared locally.
+- It went unnoticed for five days because a 30-day session cookie kept an admin signed
+  in, and no email was sent between Aug 13 and Aug 18.
+
+Diagnosing it the fast way, in order — each rules out a whole layer:
+
+```bash
+timeout 10 bash -c '</dev/tcp/mail.jaipurrugs.com/465' && echo OPEN || echo BLOCKED
+set -a; source .env.production; set +a; node scripts/check-mail.mjs
+```
+
+`ping` is useless here: ICMP succeeded the entire time. Only TCP was dropped.
+
+Three changes came out of it:
+
+- **`mailer.ts` has explicit timeouts.** Without them nodemailer waits out its own
+  defaults (30s greeting, 2min connect) and the form just spins. Now it fails in 10s.
+- **`verifyMailCredentials` logs the error code.** `EAUTH` = bad password;
+  `ETIMEDOUT`/`ECONNECTION` = can't reach the server. These are indistinguishable to
+  the user and telling them apart is the whole diagnosis. Check `pm2 logs` for
+  `[mail] verify failed`.
+- **`secure` follows `MAIL_SMTP_PORT`.** It was hardcoded `true`, so setting the port to
+  587 would have silently hung — 587 needs STARTTLS, not implicit TLS.
+
+### `ADMIN_PASSWORD_LOGIN` — the way back in
+
+Leave it unset. If the mail server is unreachable and admins are locked out:
+
+```bash
+node prisma/add-admin.mjs someone@jaipurrugs.com "Their Name" --dev-password <pw>
+# add ADMIN_PASSWORD_LOGIN=true to .env.production
+pm2 restart holistic-dashboard --update-env
+```
+
+Unlike `DEV_SKIP_MAIL_VERIFY` this **works in production** — deliberately, and that is
+why it is a separate flag. It only helps admins who have a password hash, logs every
+use, and does **not** capture a mailbox credential, so those sessions still cannot send
+mail. Unset it once the network is fixed.
+
+### Sent-folder appends are serialised
+
+`appendToSent` opens one IMAP connection per email. A batch fired them simultaneously
+and the server refused partway through — mail delivered, Sent copy silently missing.
+They now run one at a time with a 500ms gap (`queueImap`). The merchant email tool hit
+the identical problem on this same mail server. Don't reintroduce parallel appends.

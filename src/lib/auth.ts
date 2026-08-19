@@ -37,6 +37,24 @@ export async function verifyTraineeCredentials(email: string, password: string) 
 const skipMailVerify = () =>
   process.env.DEV_SKIP_MAIL_VERIFY === "true" && process.env.NODE_ENV !== "production";
 
+/* Emergency fallback: let admins sign in with a locally stored password instead of
+   their live mailbox.
+
+   Admin auth normally IS a live SMTP connection, so anything that breaks the network
+   path to the mail server locks out every admin at once. Not hypothetical — a firewall
+   change on 2026-08-13 made the mail server unreachable from this box and no admin
+   could sign in until it was fixed, while trainees carried on fine.
+
+   Unlike DEV_SKIP_MAIL_VERIFY this deliberately DOES work in production, which is why
+   it is a separate, explicitly named flag rather than a loosening of that guard. Leave
+   it unset. Set it only while locked out, and unset it again afterwards.
+
+   Narrow on purpose: only admins who already have a password hash (add-admin.mjs
+   --dev-password) can use it, every use is logged, and the entered password is NOT
+   kept as a mailbox credential — a session opened this way still cannot send mail. */
+const adminPasswordLogin = () => process.env.ADMIN_PASSWORD_LOGIN === "true";
+
+// Reports WHICH path succeeded: only a real mailbox check yields a usable send credential.
 export async function verifyAdminCredentials(email: string, password: string) {
   const user = await db.user.findUnique({ where: { email: email.trim().toLowerCase() } });
   if (!user || user.role !== "admin" || !user.active || !user.email) return null;
@@ -45,11 +63,24 @@ export async function verifyAdminCredentials(email: string, password: string) {
     // Dev-only escape hatch so local work doesn't require real mail credentials.
     if (!user.passwordHash) return null;
     const ok = await bcrypt.compare(password, user.passwordHash);
-    return ok ? user : null;
+    return ok ? { user, viaMail: false } : null;
+  }
+
+  if (adminPasswordLogin() && user.passwordHash) {
+    const ok = await bcrypt.compare(password, user.passwordHash);
+    if (ok) {
+      console.warn(
+        `[auth] ADMIN_PASSWORD_LOGIN: ${user.email} signed in with a stored password. ` +
+          `The mailbox was not verified, so this session cannot send mail.`,
+      );
+      return { user, viaMail: false };
+    }
+    // Fall through rather than reject — with the flag on, the real mailbox password
+    // must still work the moment the mail server is reachable again.
   }
 
   const ok = await verifyMailCredentials(user.email, password);
-  return ok ? user : null;
+  return ok ? { user, viaMail: true } : null;
 }
 
 // Single entry point for the login form: looks the user up once, dispatches to the
@@ -62,11 +93,12 @@ export async function authenticate(
   if (!user) return null;
 
   if (user.role === "admin") {
-    const ok = await verifyAdminCredentials(user.email!, password);
-    if (!ok) return null;
+    const result = await verifyAdminCredentials(user.email!, password);
+    if (!result) return null;
     // Only hold the mailbox password when it was actually verified against the mail
-    // server — in dev-skip mode it isn't a real mailbox credential, so we don't keep it.
-    return { user, mailPassword: skipMailVerify() ? undefined : password };
+    // server. A dev-skip or ADMIN_PASSWORD_LOGIN password is not a mailbox credential;
+    // keeping it would persist a secret that silently fails at send time.
+    return { user, mailPassword: result.viaMail ? password : undefined };
   }
 
   const ok = await verifyTraineeCredentials(user.email!, password);
