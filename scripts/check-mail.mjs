@@ -109,8 +109,20 @@ const { default: nodemailer } = await import("nodemailer");
 const { ImapFlow } = await import("imapflow");
 
 try {
+  // Mirror src/lib/mailer.ts exactly: 465 is implicit TLS, everything else STARTTLS.
+  // Hardcoding secure:true here made this test useless on 587 and 25 — it would report
+  // FAIL on a port that works, which is the opposite of what a diagnostic should do.
   await nodemailer
-    .createTransport({ host, port: smtpPort, secure: true, auth: { user: creds.user, pass: creds.pass } })
+    .createTransport({
+      host,
+      port: smtpPort,
+      secure: smtpPort === 465,
+      requireTLS: smtpPort !== 465,
+      auth: { user: creds.user, pass: creds.pass },
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 20_000,
+    })
     .verify();
   console.log(`\n  OK    SMTP auth as ${creds.user} — admin login will succeed for this mailbox.`);
 } catch (e) {
