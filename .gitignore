@@ -50,3 +50,7 @@ people.csv
 # Database copies made for sharing/migration — real trainee PII, never commit
 /exports/
 
+
+# ...but the template with no secrets in it must ship, or a fresh clone has no reference
+# for what to set. HANDOFF §2 tells you to copy it.
+!.env.example
