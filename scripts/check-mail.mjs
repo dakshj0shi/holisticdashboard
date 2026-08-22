@@ -12,6 +12,24 @@
 // also proves the credentials authenticate and the Sent folder can be found, which is
 // the full path the app uses.
 import tls from "node:tls";
+import net from "node:net";
+
+/* Ports worth knowing about, not just the two currently configured. A network that blocks
+   465 very often allows 587 (submission), and src/lib/mailer.ts now picks its TLS mode
+   from MAIL_SMTP_PORT — so if 587 comes back open, mail is recoverable by changing that
+   env var alone, with no code edit.
+
+   IMPLICIT_TLS matters: 465 and 993 expect a TLS handshake immediately, while 25, 143 and
+   587 start in plaintext and upgrade later. Probing those with tls.connect would report
+   FAIL on a port that is wide open. */
+const IMPLICIT_TLS = new Set([465, 993]);
+const CANDIDATES = [
+  { port: 25, label: "SMTP relay        " },
+  { port: 143, label: "IMAP plaintext    " },
+  { port: 465, label: "SMTP implicit TLS " },
+  { port: 587, label: "SMTP STARTTLS     " },
+  { port: 993, label: "IMAP implicit TLS " },
+];
 
 const host = process.env.MAIL_HOST || "mail.jaipurrugs.com";
 const smtpPort = Number(process.env.MAIL_SMTP_PORT ?? 465);
@@ -28,7 +46,7 @@ if (loginIdx !== -1 && (!creds.user || !creds.pass)) {
 function probe(port, label) {
   return new Promise((resolve) => {
     const started = Date.now();
-    const socket = tls.connect({ host, port, servername: host }, () => {
+    const onConnect = () => {
       const ms = Date.now() - started;
       socket.once("data", (chunk) => {
         socket.end();
@@ -39,7 +57,10 @@ function probe(port, label) {
         socket.end();
         resolve({ ok: true, label, port, ms, greeting: "(connected, no greeting)" });
       }, 3000);
-    });
+    };
+    const socket = IMPLICIT_TLS.has(port)
+      ? tls.connect({ host, port, servername: host }, onConnect)
+      : net.connect({ host, port }, onConnect);
     socket.setTimeout(10000, () => {
       socket.destroy();
       resolve({ ok: false, label, port, error: "timed out after 10s — port is most likely blocked" });
@@ -50,16 +71,28 @@ function probe(port, label) {
 
 console.log(`Checking ${host} …\n`);
 
-const results = [await probe(smtpPort, "SMTP (sending)"), await probe(imapPort, "IMAP (Sent folder)")];
-
-for (const r of results) {
-  if (r.ok) console.log(`  OK    ${r.label} :${r.port}  ${r.ms}ms  ${r.greeting}`);
-  else console.log(`  FAIL  ${r.label} :${r.port}  ${r.error}`);
+// Sequentially: a blocked port costs the full 10s timeout, and firing five at once at a
+// firewall is a good way to get this source address throttled.
+const results = [];
+for (const c of CANDIDATES) {
+  const tag = c.port === smtpPort || c.port === imapPort ? "  <- configured" : "";
+  results.push({ ...(await probe(c.port, c.label)), tag });
 }
 
-const blocked = results.filter((r) => !r.ok);
+for (const r of results) {
+  if (r.ok) console.log(`  OK    ${r.label} :${r.port}  ${r.ms}ms  ${r.greeting}${r.tag}`);
+  else console.log(`  FAIL  ${r.label} :${r.port}  ${r.error}${r.tag}`);
+}
+
+// Only the ports this deployment actually uses decide whether mail can work right now.
+const blocked = results.filter((r) => !r.ok && (r.port === smtpPort || r.port === imapPort));
+
+if (blocked.length && results.some((r) => r.ok && r.port === 587) && smtpPort !== 587) {
+  console.log(`\n587 is reachable while the configured SMTP port is not.`);
+  console.log("Set MAIL_SMTP_PORT=587 in the env file and restart — mailer.ts switches to STARTTLS on its own.");
+}
 if (blocked.length) {
-  console.log(`\n${blocked.length} of 2 ports unreachable.`);
+  console.log(`\n${blocked.length} of the 2 configured ports unreachable.`);
   console.log("If this is a fresh VPS, ask the host to open outbound SMTP, or check the firewall:");
   console.log("  sudo ufw status");
   console.log("Until it's fixed, leave MAIL_HOST empty so mail is simulated instead of failing.");

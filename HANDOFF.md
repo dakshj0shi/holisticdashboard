@@ -34,12 +34,12 @@ Read **Traps** before your first change — most of it is stuff that already bit
 npm install
 cp .env.example .env      # then fill in the values — see §3
 npm run db:push           # create prisma/dev.db from schema
-npm run admin -- you@example.com "Your Name" --super --dev-password test1234
+npm run admin -- you@example.com "Your Name" --super --password test1234
 npm run dev               # http://localhost:3000
 ```
 
 For local admin login without a real mailbox, set `DEV_SKIP_MAIL_VERIFY=true` in
-`.env` and use the `--dev-password` you set above. **This is dev-only and cannot
+`.env` and use the `--password` you set above. **This is dev-only and cannot
 work in production** — see §5.
 
 Useful:
@@ -301,15 +301,16 @@ All in `prisma/`, run with `npm run <name>` or `node prisma/<file>`.
 
 | Command | What |
 |---|---|
-| `npm run admin -- <email> "<Name>"` | Allowlist a facilitator. `--list`, `--revoke <email>`, `--super`, `--revoke-super`, `--dev-password <pw>`. Re-running never silently demotes a super admin. |
+| `npm run admin -- <email> "<Name>"` | Allowlist a facilitator. `--list`, `--revoke <email>`, `--super`, `--revoke-super`, `--password <pw>`. Re-running never silently demotes a super admin. |
 | `npm run import -- "<file.xlsx>"` | Import the SESSION LIST spreadsheet. Idempotent — re-running against an updated copy upserts rather than duplicating batches/trainees/records. |
 | `npm run fix:years` | Bulk-fix dates typed with the wrong year (2027→2026). `--dry-run` first. Only shifts a date if the batch's sessions stay in ascending order; anything genuinely booked ahead is reported and left alone. |
 | `npm run trainees` | Bulk trainee setup |
 | `npm run clean` | Remove test data |
 | `npm run demo` / `npm run mock` | Seed demo/mock data |
 | `npm run reset` | **Wipes the DB.** |
-| `npm run check:mail` | Verify SMTP/IMAP connectivity |
+| `npm run check:mail` | Probe every mail port (25/143/465/587/993) from this machine, and optionally test real credentials with `--login <email> '<pw>'`. Run it ON the box that is failing — reachability differs per host. |
 | `npm run check:templates` | Self-check the email template renderer. No DB, no network — safe anywhere. |
+| `npm run check:auth` | Self-check how mail failures are classified (`refused` vs `unreachable`), the branch that decides whether admin login can fall back to a stored password. No DB, no network. |
 
 Facilitators can also be added from the UI now: **batch → Settings tab → "New
 facilitator"** panel. Same effect as the CLI (allowlist an email as `role: "admin"`),
@@ -394,15 +395,35 @@ Three changes came out of it:
 Leave it unset. If the mail server is unreachable and admins are locked out:
 
 ```bash
-node prisma/add-admin.mjs someone@jaipurrugs.com "Their Name" --dev-password <pw>
+node prisma/add-admin.mjs someone@jaipurrugs.com "Their Name" --password <pw>
 # add ADMIN_PASSWORD_LOGIN=true to .env.production
 pm2 restart holistic-dashboard --update-env
 ```
+
+`npm run admin -- --list` marks every admin `pw` or `no-pw`. Set passwords **before** an
+outage — the `no-pw` accounts have no way in at all once the mail server is unreachable.
 
 Unlike `DEV_SKIP_MAIL_VERIFY` this **works in production** — deliberately, and that is
 why it is a separate flag. It only helps admins who have a password hash, logs every
 use, and does **not** capture a mailbox credential, so those sessions still cannot send
 mail. Unset it once the network is fixed.
+
+Because such a session cannot send, everything that emails degrades instead of failing:
+
+- `sendMailAsAdmin` short-circuits to status **`skipped_no_mail`** the moment it sees no
+  password, *before* opening a socket. Without that guard every recipient burns the full
+  10s SMTP timeout, so one batch would spin for minutes and then fail per trainee anyway.
+- The console shows an amber banner, and the schedule/summary forms say "no email sent"
+  instead of "trainees notified". A silent no-op here is worse than the outage.
+- **Sending a summary still marks the session `completed`** and still snapshots the
+  facilitator. The recap is saved; only the email is skipped. So `completed` no longer
+  strictly implies trainees were told — check the email log if it matters.
+
+A login that fails because the mail server is unreachable now says so, rather than
+"wrong email or password" — see `mail_unreachable` in `authenticate`. `classifyMailError`
+in `src/lib/mailErrors.ts` decides which it was, and treats **anything unrecognised as
+unreachable**: that path still requires a valid stored password, so erring that way is
+free, while erring the other way locks everyone out. `npm run check:auth` pins it.
 
 ### Sent-folder appends are serialised
 

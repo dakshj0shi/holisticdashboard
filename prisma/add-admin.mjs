@@ -8,9 +8,11 @@
 // verified live against MAIL_HOST at sign-in — so this script is purely an allowlist:
 // only the addresses added here can reach the admin console at all.
 //
-// --dev-password <pw> additionally stores a bcrypt hash for LOCAL testing only. It is
-// ignored unless DEV_SKIP_MAIL_VERIFY=true AND NODE_ENV is not "production" (see
-// src/lib/auth.ts), so it can never be used to bypass mail verification on the server.
+// --password <pw> stores a bcrypt hash on the account. This is the fallback credential
+// used when the mail server cannot be reached and ADMIN_PASSWORD_LOGIN=true, so unlike
+// DEV_SKIP_MAIL_VERIFY it DOES work in production — it is what gets admins back in during
+// a mail outage. An admin with no hash cannot use that route at all, so set one before you
+// need it. --dev-password is kept as an alias for older notes.
 //
 // --super marks this admin as a super admin: they can export EVERY facilitator's
 // session report, not just their own (see src/app/api/export/facilitators/route.ts).
@@ -31,7 +33,13 @@ if (args[0] === "--list") {
   const admins = await db.user.findMany({ where: { role: "admin" }, orderBy: { email: "asc" } });
   if (!admins.length) console.log("No admins yet.");
   for (const a of admins) {
-    const flags = [a.active ? "active " : "REVOKED", a.isSuperAdmin ? "super" : "     "].join("  ");
+    // Show who has a stored password: those without one are locked out entirely if the
+    // mail server goes down, which is exactly when you cannot fix it comfortably.
+    const flags = [
+      a.active ? "active " : "REVOKED",
+      a.isSuperAdmin ? "super" : "     ",
+      a.passwordHash ? "pw   " : "no-pw",
+    ].join("  ");
     console.log(`${flags}  ${a.email}  ${a.name}`);
   }
   await db.$disconnect();
@@ -63,9 +71,9 @@ if (args[0] === "--revoke") {
   process.exit(0);
 }
 
-const pwIndex = args.indexOf("--dev-password");
-const devPassword = pwIndex === -1 ? null : args[pwIndex + 1];
-if (pwIndex !== -1 && !devPassword) fail("--dev-password needs a value.");
+const pwIndex = Math.max(args.indexOf("--password"), args.indexOf("--dev-password"));
+const password = pwIndex === -1 ? null : args[pwIndex + 1];
+if (pwIndex !== -1 && !password) fail("--password needs a value.");
 
 const superIndex = args.indexOf("--super");
 const makeSuper = superIndex !== -1;
@@ -78,11 +86,11 @@ const [emailRaw, ...nameParts] = positional;
 const email = emailRaw?.trim().toLowerCase();
 const name = nameParts.join(" ").trim();
 
-if (!email || !name) fail('Usage: node prisma/add-admin.mjs <email> "Full Name" [--dev-password <pw>] [--super]');
+if (!email || !name) fail('Usage: node prisma/add-admin.mjs <email> "Full Name" [--password <pw>] [--super]');
 if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(`"${email}" doesn't look like an email address.`);
 
 const data = { name, role: "admin", active: true, batchId: null };
-if (devPassword) data.passwordHash = await bcrypt.hash(devPassword, 10);
+if (password) data.passwordHash = await bcrypt.hash(password, 10);
 if (makeSuper) data.isSuperAdmin = true; // never demotes automatically — see header comment
 
 const existing = await db.user.findUnique({ where: { email } });
@@ -91,7 +99,7 @@ if (existing) {
   const promoting = existing.role !== "admin";
   // Promotion also detaches them from any batch (batchId above) and drops the trainee
   // bcrypt hash — admins authenticate against the mail server, so a leftover local
-  // password is a credential nobody is managing. --dev-password still wins if passed.
+  // password is a credential nobody is managing. --password still wins if passed.
   await db.user.update({
     where: { email },
     data: promoting ? { ...data, passwordHash: data.passwordHash ?? null } : data,
@@ -110,8 +118,9 @@ if (existing) {
 }
 
 console.log("They sign in at /login with this email and their normal mailbox password.");
-if (devPassword) {
-  console.log(`Local-only dev password set — works only while DEV_SKIP_MAIL_VERIFY=true and NODE_ENV != production.`);
+if (password) {
+  console.log(`Stored password set — used when the mail server is unreachable and ADMIN_PASSWORD_LOGIN=true.`);
+  console.log(`A session opened that way cannot send mail; the console is read/write, email is not.`);
 }
 if (makeSuper) {
   console.log(`Marked as super admin — can export every facilitator's session report, not just their own.`);
