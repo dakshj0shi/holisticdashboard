@@ -85,17 +85,28 @@ for (const r of results) {
 }
 
 // Only the ports this deployment actually uses decide whether mail can work right now.
-const blocked = results.filter((r) => !r.ok && (r.port === smtpPort || r.port === imapPort));
+/* Judge the two configured ports separately. They fail differently: no SMTP means
+   nothing can be sent at all, while no IMAP only costs the Sent-folder copy. Treating
+   them as one "blocked" count made this script exit before the --login test whenever
+   IMAP was down — suppressing the credential check that is the whole reason you run
+   --login while chasing a firewall rule. */
+const smtpDown = results.some((r) => !r.ok && r.port === smtpPort);
+const imapDown = results.some((r) => !r.ok && r.port === imapPort);
 
-if (blocked.length && results.some((r) => r.ok && r.port === 587) && smtpPort !== 587) {
+if (smtpDown && results.some((r) => r.ok && r.port === 587) && smtpPort !== 587) {
   console.log(`\n587 is reachable while the configured SMTP port is not.`);
   console.log("Set MAIL_SMTP_PORT=587 in the env file and restart — mailer.ts switches to STARTTLS on its own.");
 }
-if (blocked.length) {
-  console.log(`\n${blocked.length} of the 2 configured ports unreachable.`);
-  console.log("If this is a fresh VPS, ask the host to open outbound SMTP, or check the firewall:");
-  console.log("  sudo ufw status");
-  console.log("Until it's fixed, leave MAIL_HOST empty so mail is simulated instead of failing.");
+
+if (imapDown) {
+  console.log(`\nIMAP :${imapPort} unreachable. Mail can still be sent; only the copy filed in the`);
+  console.log(`sender's Sent folder fails, and those sends are logged "sent_no_sentfolder". Not fatal.`);
+}
+
+if (smtpDown) {
+  console.log(`\nSMTP :${smtpPort} unreachable — nothing can be sent on this port.`);
+  console.log("Ask for it to be opened, or check the local firewall:  sudo ufw status");
+  console.log("Until then leave MAIL_HOST empty so mail is simulated rather than failing.");
   process.exit(1);
 }
 
