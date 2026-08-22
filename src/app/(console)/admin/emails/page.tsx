@@ -8,6 +8,9 @@ const STATUS_STYLE: Record<string, string> = {
   simulated: "bg-indigo/10 text-indigo",
   failed: "bg-rose/10 text-rose",
   skipped_no_email: "bg-paper-2 text-faint",
+  // Not benign like skipped_no_email (that trainee simply has no address) — this means
+  // the send never happened because the session had no mailbox credential.
+  skipped_no_mail: "bg-amber/10 text-amber",
 };
 
 // The log stores each email's rendered HTML. Show it as the words a trainee actually

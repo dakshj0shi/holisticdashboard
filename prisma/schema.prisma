@@ -225,7 +225,9 @@ model EmailLog {
 
   subject String
   body    String // rendered HTML/text — kept for admin visibility & dev debugging
-  status  String  @default("sent") // sent | sent_no_sentfolder | simulated | failed | skipped_no_email
+  // skipped_no_mail: the admin's session had no mailbox credential (stored-password
+  // sign-in while the mail server was unreachable), so no send was attempted.
+  status  String  @default("sent") // sent | sent_no_sentfolder | simulated | failed | skipped_no_email | skipped_no_mail
   error   String?
 
   createdAt DateTime @default(now())

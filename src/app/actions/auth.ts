@@ -12,7 +12,18 @@ export async function loginAction(_prev: unknown, formData: FormData) {
   if (!email || !password) return { error: "Enter your email and password." };
 
   const result = await authenticate(email, password);
-  if (!result) return { error: "Wrong email or password. Try again." };
+  if (!result.ok) {
+    // Distinguish the two so nobody retypes a correct password for an hour. Admin auth is
+    // a live SMTP connection, so an unreachable mail server rejects logins that are
+    // otherwise perfectly valid — that needs ADMIN_PASSWORD_LOGIN on the server, not a
+    // different password.
+    return {
+      error:
+        result.reason === "mail_unreachable"
+          ? "The mail server can't be reached, so your mailbox password can't be checked. Ask whoever runs the server to enable password sign-in."
+          : "Wrong email or password. Try again.",
+    };
+  }
 
   await createSession(result.user.id, result.mailPassword);
   await logEvent(result.user.id, "login");

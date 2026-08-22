@@ -15,6 +15,8 @@ export function ScheduleSlotForm({ slot, suggestedDate }: { slot: Slot; suggeste
   const [needsConfirm, setNeedsConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  // Nothing emailed — the date still saved, so this is a warning, not an error.
+  const [doneSilent, setDoneSilent] = useState(false);
   const [pending, startTransition] = useTransition();
 
   const isFirstSchedule = slot.status === "unscheduled";
@@ -36,7 +38,17 @@ export function ScheduleSlotForm({ slot, suggestedDate }: { slot: Slot; suggeste
         setError(result.error ?? "Something went wrong.");
         return;
       }
-      setDone(isFirstSchedule ? "Scheduled — trainees notified." : "Rescheduled — trainees notified of the new date.");
+      // Don't claim trainees were notified when the mail server was never reachable.
+      setDoneSilent(Boolean(result.mailUnavailable));
+      if (result.mailUnavailable) {
+        setDone(
+          isFirstSchedule
+            ? "Scheduled — no email sent, the mail server is unavailable."
+            : "Rescheduled — no email sent, the mail server is unavailable.",
+        );
+      } else {
+        setDone(isFirstSchedule ? "Scheduled — trainees notified." : "Rescheduled — trainees notified of the new date.");
+      }
     });
   }
 
@@ -63,6 +75,7 @@ export function ScheduleSlotForm({ slot, suggestedDate }: { slot: Slot; suggeste
           setDate(e.target.value);
           setNeedsConfirm(false);
           setDone(null);
+          setDoneSilent(false);
         }}
         className="rounded-lg border border-line-strong bg-paper px-2.5 py-1.5 text-sm text-ink focus:border-indigo focus:outline-none"
       />
@@ -99,7 +112,7 @@ export function ScheduleSlotForm({ slot, suggestedDate }: { slot: Slot; suggeste
         </button>
       )}
       {error && <span className="text-sm text-rose">{error}</span>}
-      {done && <span className="text-sm text-teal">{done}</span>}
+      {done && <span className={`text-sm ${doneSilent ? "text-amber" : "text-teal"}`}>{done}</span>}
     </div>
   );
 }

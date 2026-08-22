@@ -54,16 +54,20 @@ const skipMailVerify = () =>
    kept as a mailbox credential — a session opened this way still cannot send mail. */
 const adminPasswordLogin = () => process.env.ADMIN_PASSWORD_LOGIN === "true";
 
-// Reports WHICH path succeeded: only a real mailbox check yields a usable send credential.
+// Reports WHICH path succeeded — only a real mailbox check yields a usable send
+// credential — and WHY a failure failed, so the login form can tell a wrong password
+// apart from a mail server nobody can reach.
 export async function verifyAdminCredentials(email: string, password: string) {
+  const bad = { ok: false, reason: "bad_credentials" } as const;
+
   const user = await db.user.findUnique({ where: { email: email.trim().toLowerCase() } });
-  if (!user || user.role !== "admin" || !user.active || !user.email) return null;
+  if (!user || user.role !== "admin" || !user.active || !user.email) return bad;
 
   if (skipMailVerify()) {
     // Dev-only escape hatch so local work doesn't require real mail credentials.
-    if (!user.passwordHash) return null;
+    if (!user.passwordHash) return bad;
     const ok = await bcrypt.compare(password, user.passwordHash);
-    return ok ? { user, viaMail: false } : null;
+    return ok ? ({ ok: true, user, viaMail: false } as const) : bad;
   }
 
   if (adminPasswordLogin() && user.passwordHash) {
@@ -73,14 +77,20 @@ export async function verifyAdminCredentials(email: string, password: string) {
         `[auth] ADMIN_PASSWORD_LOGIN: ${user.email} signed in with a stored password. ` +
           `The mailbox was not verified, so this session cannot send mail.`,
       );
-      return { user, viaMail: false };
+      return { ok: true, user, viaMail: false } as const;
     }
     // Fall through rather than reject — with the flag on, the real mailbox password
     // must still work the moment the mail server is reachable again.
   }
 
-  const ok = await verifyMailCredentials(user.email, password);
-  return ok ? { user, viaMail: true } : null;
+  const verdict = await verifyMailCredentials(user.email, password);
+  if (verdict === "ok") return { ok: true, user, viaMail: true } as const;
+
+  // A server that answered and refused the password is a genuinely wrong password. One
+  // we could not reach tells us nothing about the password, so don't blame the user for
+  // it — that distinction is the difference between "retype it" and "the mail server is
+  // down, turn ADMIN_PASSWORD_LOGIN on".
+  return verdict === "refused" ? bad : ({ ok: false, reason: "mail_unreachable" } as const);
 }
 
 // Single entry point for the login form: looks the user up once, dispatches to the
@@ -88,21 +98,26 @@ export async function verifyAdminCredentials(email: string, password: string) {
 export async function authenticate(
   email: string,
   password: string,
-): Promise<{ user: { id: string; role: string }; mailPassword?: string } | null> {
+): Promise<
+  | { ok: true; user: { id: string; role: string }; mailPassword?: string }
+  | { ok: false; reason: "bad_credentials" | "mail_unreachable" }
+> {
+  const bad = { ok: false, reason: "bad_credentials" } as const;
+
   const user = await db.user.findUnique({ where: { email: email.trim().toLowerCase() } });
-  if (!user) return null;
+  if (!user) return bad;
 
   if (user.role === "admin") {
     const result = await verifyAdminCredentials(user.email!, password);
-    if (!result) return null;
+    if (!result.ok) return result;
     // Only hold the mailbox password when it was actually verified against the mail
     // server. A dev-skip or ADMIN_PASSWORD_LOGIN password is not a mailbox credential;
     // keeping it would persist a secret that silently fails at send time.
-    return { user, mailPassword: result.viaMail ? password : undefined };
+    return { ok: true, user, mailPassword: result.viaMail ? password : undefined };
   }
 
   const ok = await verifyTraineeCredentials(user.email!, password);
-  return ok ? { user } : null;
+  return ok ? { ok: true, user } : bad;
 }
 
 export async function createSession(userId: string, mailPassword?: string) {
@@ -151,6 +166,19 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
 
   const { id, email, name, role } = session.user;
   return { id, email: email ?? "", name, role };
+}
+
+// Whether this session can actually send mail. False after a stored-password sign-in
+// (ADMIN_PASSWORD_LOGIN), and worth surfacing in the console — otherwise an admin
+// schedules a session, sees no error, and assumes trainees were emailed. Selects just the
+// one column and never decrypts it; this runs on every console page render.
+export async function hasMailCredential(): Promise<boolean> {
+  const jar = await cookies();
+  const token = jar.get(SESSION_COOKIE)?.value;
+  if (!token) return false;
+
+  const session = await db.session.findUnique({ where: { token }, select: { mailPasswordEnc: true } });
+  return Boolean(session?.mailPasswordEnc);
 }
 
 // The decrypted mailbox password for the current admin session — used only at the

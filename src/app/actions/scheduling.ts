@@ -6,6 +6,16 @@ import { getCurrentUser, getCurrentAdminMailCredential } from "@/lib/auth";
 import { logEvent } from "@/lib/events";
 import { scheduleSlot, rescheduleSlot, sendSlotSummary } from "@/lib/scheduling";
 
+// What the forms need to word their confirmation honestly: `mailUnavailable` means this
+// session has no mailbox credential, so the date/recap was saved but nobody was emailed.
+export type MailActionResult = {
+  ok: boolean;
+  needsConfirm?: boolean;
+  error?: string;
+  sent?: number;
+  mailUnavailable?: boolean;
+};
+
 async function requireAdminMailContext() {
   const user = await getCurrentUser();
   if (!user || user.role !== "admin") return null;
@@ -20,7 +30,7 @@ export async function scheduleSessionSlot(
   slotId: string,
   dateStr: string,
   force?: boolean,
-): Promise<{ ok: boolean; needsConfirm?: boolean; error?: string }> {
+): Promise<MailActionResult> {
   const admin = await requireAdminMailContext();
   if (!admin) return { ok: false, error: "Not authorized." };
 
@@ -37,13 +47,13 @@ export async function scheduleSessionSlot(
   await logEvent(admin.id, "session_schedule", `Session ${slot?.index} → ${date.toDateString()}`);
   if (slot) revalidatePath(`/admin/batches/${slot.batchId}`);
   revalidatePath("/dashboard");
-  return { ok: true };
+  return { ok: true, sent: result.sent, mailUnavailable: result.mailUnavailable };
 }
 
 export async function rescheduleSessionSlot(
   slotId: string,
   dateStr: string,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<MailActionResult> {
   const admin = await requireAdminMailContext();
   if (!admin) return { ok: false, error: "Not authorized." };
 
@@ -57,7 +67,7 @@ export async function rescheduleSessionSlot(
   await logEvent(admin.id, "session_reschedule", `Session ${slot?.index} → ${date.toDateString()}`);
   if (slot) revalidatePath(`/admin/batches/${slot.batchId}`);
   revalidatePath("/dashboard");
-  return { ok: true };
+  return { ok: true, sent: result.sent, mailUnavailable: result.mailUnavailable };
 }
 
 // Fixing a data-entry error (usually a wrong date off the Excel import), NOT a real
@@ -94,7 +104,7 @@ export async function sendSessionSummary(
   slotId: string,
   _prev: unknown,
   formData: FormData,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<MailActionResult> {
   const admin = await requireAdminMailContext();
   if (!admin) return { ok: false, error: "Not authorized." };
 
@@ -109,7 +119,7 @@ export async function sendSessionSummary(
   if (slot) revalidatePath(`/admin/batches/${slot.batchId}`);
   revalidatePath("/admin");
   revalidatePath("/dashboard");
-  return { ok: true };
+  return { ok: true, sent: result.sent, mailUnavailable: result.mailUnavailable };
 }
 
 export async function markSessionComplete(userId: string, slotId: string, completed: boolean) {

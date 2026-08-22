@@ -3,7 +3,7 @@
 import { useActionState } from "react";
 import { sendSessionSummary } from "@/app/actions";
 
-const initial: { ok: boolean; error?: string } = { ok: false };
+const initial: { ok: boolean; error?: string; mailUnavailable?: boolean } = { ok: false };
 
 export function SessionSummaryForm({ slotId, initialSummary }: { slotId: string; initialSummary: string | null }) {
   const action = async (_prev: typeof initial, formData: FormData) => sendSessionSummary(slotId, _prev, formData);
@@ -27,7 +27,15 @@ export function SessionSummaryForm({ slotId, initialSummary }: { slotId: string;
           {pending ? "Sending…" : initialSummary ? "Resend summary" : "Send summary"}
         </button>
         {state.error && <span className="text-sm text-rose">{state.error}</span>}
-        {!state.error && state.ok && <span className="text-sm text-teal">Sent — trainees notified.</span>}
+        {!state.error && state.ok && (
+          // The recap is saved and the session is marked completed either way; only the
+          // email depends on the mail server being reachable.
+          <span className={`text-sm ${state.mailUnavailable ? "text-amber" : "text-teal"}`}>
+            {state.mailUnavailable
+              ? "Recap saved and session completed — no email sent, the mail server is unavailable."
+              : "Sent — trainees notified."}
+          </span>
+        )}
       </div>
     </form>
   );

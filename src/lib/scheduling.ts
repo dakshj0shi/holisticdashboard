@@ -10,6 +10,13 @@ async function loadTemplate(kind: TemplateKind): Promise<Template> {
   return row ?? DEFAULTS[kind];
 }
 
+// What actually happened to a batch of sends. `mailUnavailable` means this session has
+// no mailbox credential (the admin signed in with a stored password because the mail
+// server was unreachable), so nothing was even attempted — see sendMailAsAdmin.
+export type MailOutcome = { sent: number; mailUnavailable: boolean };
+
+const SENT_STATUSES = ["sent", "sent_no_sentfolder", "simulated"];
+
 function formatDate(d: Date) {
   return d.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
 }
@@ -27,6 +34,7 @@ async function notifyBatch(opts: {
   const trainees = await db.user.findMany({ where: { batchId: slot.batchId, role: "trainee", active: true } });
 
   const tpl = await loadTemplate(kind);
+  const outcome: MailOutcome = { sent: 0, mailUnavailable: false };
 
   for (const t of trainees) {
     const { subject, html, text } = renderTemplate(tpl, {
@@ -36,7 +44,7 @@ async function notifyBatch(opts: {
       date: formatDate(date),
     });
 
-    await sendMailAsAdmin({
+    const result = await sendMailAsAdmin({
       adminEmail,
       adminPassword,
       sentByUserId: adminUserId,
@@ -46,12 +54,16 @@ async function notifyBatch(opts: {
       slotId: slot.id,
       mail: { to: t.email ?? "", subject, html, text },
     });
+    if (SENT_STATUSES.includes(result.status)) outcome.sent++;
+    if (result.status === "skipped_no_mail") outcome.mailUnavailable = true;
   }
 
   await db.batchSessionSlot.update({
     where: { id: slot.id },
     data: { notifiedAt: new Date(), notifiedForDate: date },
   });
+
+  return outcome;
 }
 
 // Any other slot (any batch, including this one) already scheduled/rescheduled for the
@@ -75,7 +87,10 @@ async function findSchedulingConflict(date: Date, excludeSlotId: string) {
   return conflict ? `${conflict.batch.name} already has Session ${conflict.index} on this date — pick another.` : null;
 }
 
-export type ScheduleResult = { ok: true } | { ok: false; needsConfirm: true } | { ok: false; error: string };
+export type ScheduleResult =
+  | ({ ok: true } & MailOutcome)
+  | { ok: false; needsConfirm: true }
+  | { ok: false; error: string };
 
 export async function scheduleSlot(
   slotId: string,
@@ -98,7 +113,7 @@ export async function scheduleSlot(
     data: { scheduledDate: date, status: "scheduled" },
   });
 
-  await notifyBatch({
+  const outcome = await notifyBatch({
     slot,
     batchName: slot.batch.name,
     date,
@@ -108,7 +123,7 @@ export async function scheduleSlot(
     adminPassword: admin.password,
   });
 
-  return { ok: true };
+  return { ok: true, ...outcome };
 }
 
 export async function rescheduleSlot(
@@ -127,7 +142,7 @@ export async function rescheduleSlot(
     data: { scheduledDate: newDate, status: "rescheduled", rescheduledFrom: slot.scheduledDate },
   });
 
-  await notifyBatch({
+  const outcome = await notifyBatch({
     slot,
     batchName: slot.batch.name,
     date: newDate,
@@ -137,10 +152,10 @@ export async function rescheduleSlot(
     adminPassword: admin.password,
   });
 
-  return { ok: true };
+  return { ok: true, ...outcome };
 }
 
-export type SendSummaryResult = { ok: true } | { ok: false; error: string };
+export type SendSummaryResult = ({ ok: true } & MailOutcome) | { ok: false; error: string };
 
 // Sends the admin's written recap to every trainee in the batch and marks the
 // session completed — this is the only place a slot's status becomes "completed".
@@ -155,6 +170,7 @@ export async function sendSlotSummary(
 
   const trainees = await db.user.findMany({ where: { batchId: slot.batchId, role: "trainee", active: true } });
   const tpl = await loadTemplate("session_summary");
+  const outcome: MailOutcome = { sent: 0, mailUnavailable: false };
 
   for (const t of trainees) {
     const { subject, html, text } = renderTemplate(tpl, {
@@ -164,7 +180,7 @@ export async function sendSlotSummary(
       summary,
     });
 
-    await sendMailAsAdmin({
+    const result = await sendMailAsAdmin({
       adminEmail: admin.email,
       adminPassword: admin.password,
       sentByUserId: admin.id,
@@ -174,6 +190,8 @@ export async function sendSlotSummary(
       slotId: slot.id,
       mail: { to: t.email ?? "", subject, html, text },
     });
+    if (SENT_STATUSES.includes(result.status)) outcome.sent++;
+    if (result.status === "skipped_no_mail") outcome.mailUnavailable = true;
   }
 
   // Snapshot who was facilitating the batch at the moment this session completed —
@@ -184,7 +202,7 @@ export async function sendSlotSummary(
     where: { id: slotId },
     data: { summary, status: "completed", facilitatorId: slot.facilitatorId ?? slot.batch.facilitatorId },
   });
-  return { ok: true };
+  return { ok: true, ...outcome };
 }
 
 // Suggested date for a batch's next unscheduled session: 7 days after its own

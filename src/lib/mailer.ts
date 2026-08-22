@@ -3,6 +3,7 @@ import nodemailer from "nodemailer";
 import MailComposer from "nodemailer/lib/mail-composer";
 import { ImapFlow } from "imapflow";
 import { db } from "./db";
+import { classifyMailError, mailErrorCode, type MailVerdict } from "./mailErrors";
 
 const SENT_FOLDER_CANDIDATES = ["Sent", "Sent Items", "INBOX.Sent", "INBOX/Sent"];
 
@@ -34,20 +35,22 @@ function smtpTransport(email: string, password: string) {
 }
 
 // Used by auth.ts at admin login — a successful connection IS the credential check.
-export async function verifyMailCredentials(email: string, password: string): Promise<boolean> {
-  if (!mailConfigured()) return false;
+//
+// Returns which kind of failure it was, because auth.ts acts on them differently: a
+// refused password rejects the login outright, while a server we could not reach may
+// fall back to the stored admin password (see ADMIN_AUTH in auth.ts). Not being able to
+// tell those apart is what turned a firewall change into a long hunt. With no MAIL_HOST
+// there is nothing to ask, which counts as unreachable.
+export async function verifyMailCredentials(email: string, password: string): Promise<MailVerdict> {
+  if (!mailConfigured()) return "unreachable";
   try {
     const transport = smtpTransport(email, password);
     await transport.verify();
-    return true;
+    return "ok";
   } catch (e) {
-    // A refused password and an unreachable mail server both reach the user as "wrong
-    // email or password". Record which it actually was — the codes differ (EAUTH vs
-    // ETIMEDOUT / ECONNECTION / ESOCKET), and not being able to tell them apart turned
-    // a firewall change into a six-day hunt. Never log the password.
-    const code = (e as { code?: string }).code ?? "unknown";
-    console.warn(`[mail] verify failed for ${email}: ${code} - ${String(e).slice(0, 200)}`);
-    return false;
+    // Never log the password.
+    console.warn(`[mail] verify failed for ${email}: ${mailErrorCode(e)} - ${String(e).slice(0, 200)}`);
+    return classifyMailError(e);
   }
 }
 
@@ -113,7 +116,13 @@ export type SendMailInput = {
 };
 
 export type SendMailAsAdminResult = {
-  status: "sent" | "sent_no_sentfolder" | "simulated" | "failed" | "skipped_no_email";
+  status:
+    | "sent"
+    | "sent_no_sentfolder"
+    | "simulated"
+    | "failed"
+    | "skipped_no_email"
+    | "skipped_no_mail";
   error?: string;
 };
 
@@ -156,6 +165,15 @@ export async function sendMailAsAdmin(opts: {
     console.log(`[dev-mail:simulated] to=${mail.to} subject="${mail.subject}"\n${mail.text}`);
     await log("simulated");
     return { status: "simulated" };
+  }
+
+  // No mailbox credential on this session: the admin signed in with their stored password
+  // because the mail server could not be reached (ADMIN_AUTH in auth.ts). Skip instead of
+  // attempting a send — without this every recipient burns the full 10s SMTP timeout, so
+  // one batch spins for minutes and then logs a failure per trainee anyway.
+  if (!adminPassword) {
+    await log("skipped_no_mail");
+    return { status: "skipped_no_mail" };
   }
 
   try {

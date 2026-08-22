@@ -19,7 +19,8 @@
     "import": "node prisma/import-sessions.mjs",
     "fix:years": "node prisma/fix-session-years.mjs",
     "check:mail": "node scripts/check-mail.mjs",
-    "check:templates": "node --experimental-strip-types scripts/check-email-templates.mjs"
+    "check:templates": "node --experimental-strip-types scripts/check-email-templates.mjs",
+    "check:auth": "node --experimental-strip-types scripts/check-admin-auth.mjs"
   },
   "engines": {
     "node": ">=20.9"
